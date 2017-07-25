@@ -497,6 +497,7 @@ METHOD(keymat_v2_t, derive_child_keys, bool,
 	chunk_t *encr_r, chunk_t *integ_r)
 {
 	uint16_t enc_alg, int_alg, enc_size = 0, int_size = 0;
+	u_char wipe_buf[this->prf->get_block_size(this->prf)];
 	chunk_t seed, secret = chunk_empty;
 	prf_plus_t *prf_plus;
 
@@ -601,7 +602,11 @@ METHOD(keymat_v2_t, derive_child_keys, bool,
 		prf_plus->destroy(prf_plus);
 		return FALSE;
 	}
-
+	/* advance PRF+ to wipe state in underlying PRF */
+	if (!prf_plus->get_bytes(prf_plus, sizeof(wipe_buf), wipe_buf))
+	{
+		return FALSE;
+	}
 	prf_plus->destroy(prf_plus);
 
 	if (enc_size)
