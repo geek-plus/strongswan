@@ -284,6 +284,7 @@ static bool read_and_queue(private_netlink_socket_t *this, bool block)
 			hdr = NLMSG_NEXT(hdr, len);
 		}
 	}
+	memwipe(buf, this->buflen);
 	return FALSE;
 }
 
