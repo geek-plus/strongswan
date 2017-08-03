@@ -15,6 +15,8 @@
 
 #include "swima_collector.h"
 
+#include <swid_gen/swid_gen.h>
+
 #include <collections/linked_list.h>
 #include <bio/bio_writer.h>
 #include <utils/debug.h>
@@ -344,36 +346,60 @@ static status_t generate_tags(private_swima_collector_t *this, char *generator,
 	}
 	else if (!this->sw_id_only)
 	{
-		swima_record_t *target;
+		swid_gen_t *swid_gen;
+		swima_record_t *target, *sw_record;
 		enumerator_t *enumerator;
+		char *tag, *name, *package = NULL, *version = NULL;
+		bool installed = TRUE;
 		chunk_t sw_id;
+
+		swid_gen = swid_gen_create(generator, "strongSwan Project",
+											  "strongswan.org");
 
 		enumerator = targets->create_enumerator(targets);
 		while (enumerator->enumerate(enumerator, &target))
 		{
 			sw_id = target->get_sw_id(target, NULL);
+			name = strndup(sw_id.ptr, sw_id.len);
 
-			/* Assemble the SWID generator command */
-			snprintf(command, BUF_LEN, "%s swid --software-id %.*s%s%s",
-					 generator, sw_id.len, sw_id.ptr,
-					 pretty ? " --pretty" : "", full ? " --full" : "");
-
-			/* Open a pipe stream for reading the SWID generator output */
-			file = popen(command, "r");
-			if (!file)
+			if (this->db)
 			{
-				DBG1(DBG_IMC, "failed to run swid_generator command");
-				return NOT_SUPPORTED;
+				enumerator_t *e;
+				u_int sw_installed;
+
+				e = this->db->query(this->db,
+						"SELECT package, version, installed FROM sw_identifiers "
+						"WHERE name = ?", DB_TEXT, name,
+						 DB_TEXT, DB_TEXT, DB_UINT);
+				if (!e)
+				{
+					DBG1(DBG_IMC, "database query for sw_identifiers failed");
+					status = FAILED;
+					free(name);
+					break;
+				}
+				if (e->enumerate(e, &package, &version, &sw_installed))
+				{
+					installed = sw_installed;
+				}
+				e->destroy(e);
 			}
-			status = read_swid_tags(this, file);
-			pclose(file);
+			tag = swid_gen->generate(swid_gen, name, package, version,
+									 full && installed, pretty);
+			free(name);
 
-			if (status != SUCCESS)
+			if (!tag)
 			{
+				status = NOT_FOUND;
 				break;
 			}
+			sw_record = swima_record_create(0, sw_id, chunk_empty);
+			sw_record->set_source_id(sw_record, SOURCE_ID_GENERATOR);
+			sw_record->set_record(sw_record, chunk_from_str(tag));
+			this->inventory->add(this->inventory, sw_record);
 		}
 		enumerator->destroy(enumerator);
+		swid_gen->destroy(swid_gen);
 	}
 
 	return status;
